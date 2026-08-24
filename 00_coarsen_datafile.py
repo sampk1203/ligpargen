@@ -412,31 +412,38 @@ def coarsen(datafile, prefix=None):
         json.dump(topo, f)
     print(f"Saved topology → {topo_path}")
 
-    # ---- New bond types: key = (mol_id, canonical-elem-pair) ----
+    # ---- New bond types: key = (mol_id, canonical-elem-pair, coeff) ----
+    # A bare elem-pair key (e.g. C-F) can map to genuinely different OPLS bond
+    # types with different equilibrium lengths or spring constants (e.g. C-F in
+    # a CF₂ group vs C-F at a chain end).  Append the coeff tuple as a tiebreak
+    # — same invariant as dihedrals: the new type index must uniquely identify
+    # the FF parameters.
     bond_mol_seq = {}
-    # Also track old_btype → new_btype for Bond Coeffs remapping.
-    # One old bond type may appear in multiple mols; each maps to a different
-    # new type.  Build mapping per (old_btype, mol) pair instead.
     old_btype_mol_to_new = {}
     for b_id, b_type, i, j in bonds:
-        mol = atom_mol[i]
-        seq = tuple(sorted([atom_id_to_elem[i], atom_id_to_elem[j]]))
-        bond_mol_seq[(b_id, b_type, i, j)] = (mol, seq)
+        mol   = atom_mol[i]
+        seq   = tuple(sorted([atom_id_to_elem[i], atom_id_to_elem[j]]))
+        coeff = bond_coeffs.get(b_type)
+        bond_mol_seq[(b_id, b_type, i, j)] = (mol, seq, coeff)
     unique_bond_keys    = sorted(set(bond_mol_seq.values()))
     bond_key_to_newtype = {k: n+1 for n, k in enumerate(unique_bond_keys)}
     for b_id, b_type, i, j in bonds:
         key = bond_mol_seq[(b_id, b_type, i, j)]
         old_btype_mol_to_new[(b_type, atom_mol[i])] = bond_key_to_newtype[key]
 
-    # ---- New angle types: key = (mol_id, canonical-elem-triple) ----
+    # ---- New angle types: key = (mol_id, canonical-elem-triple, coeff) ----
+    # Same coeff-tiebreak applied for consistency — angles are currently clean
+    # on PVDF-HFP but the guard costs nothing and prevents silent merges on
+    # other systems.
     angle_mol_seq = {}
     old_agtype_mol_to_new = {}
     for ag_id, ag_type, i, j, k in angles:
-        mol = atom_mol[i]
-        seq = (atom_id_to_elem[i], atom_id_to_elem[j], atom_id_to_elem[k])
+        mol   = atom_mol[i]
+        seq   = (atom_id_to_elem[i], atom_id_to_elem[j], atom_id_to_elem[k])
         if seq[0] > seq[2]:
             seq = seq[::-1]
-        angle_mol_seq[(ag_id, ag_type, i, j, k)] = (mol, seq)
+        coeff = angle_coeffs.get(ag_type)
+        angle_mol_seq[(ag_id, ag_type, i, j, k)] = (mol, seq, coeff)
     unique_angle_keys    = sorted(set(angle_mol_seq.values()))
     angle_key_to_newtype = {k: n+1 for n, k in enumerate(unique_angle_keys)}
     for ag_id, ag_type, i, j, k in angles:
@@ -618,13 +625,9 @@ def coarsen(datafile, prefix=None):
     print(f"Saved coarsened data → {out_path}")
     print(f"\nSummary of type collapse:")
     print(f"  Atom types:    {len(masses)} → {n_atom_types}  (mol × element)")
-    print(f"  Bond types:    (original) → {n_bond_types}  (mol × elem-pair)")
-    print(f"  Angle types:   (original) → {n_angle_types}  (mol × elem-triple)")
-    print(f"  Dihedral types:(original) → {n_dih_types}  (mol × elem-quad)")
-    print(f"\nNew dihedral type map:")
-    for (mol, fseq, coeff), ntype in sorted(dih_key_to_newtype.items(), key=lambda x: x[1]):
-        elems = '-'.join(f[0] for f in fseq)
-        print(f"  type {ntype:3d}: mol {mol:2d}  {elems}  coeff={coeff}")
+    print(f"  Bond types:    (original) → {n_bond_types}  (mol × elem-pair × coeff)")
+    print(f"  Angle types:   (original) → {n_angle_types}  (mol × elem-triple × coeff)")
+    print(f"  Dihedral types:(original) → {n_dih_types}  (mol × elem-flavor-quad × coeff)")
 
     return out_path, topo_path
 

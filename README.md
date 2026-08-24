@@ -191,14 +191,17 @@ into a single full-system LAMMPS data file with OPLS-AA parameters, by:
 finding unique molecule species, running ligpargen per species (splitting
 large ones into ligpargen/BOSS-sized fragments first), stitching fragment
 parameters back together, then reassembling the full system with real
-coordinates.
+coordinates. A final coarsening step (on by default) collapses LigParGen's
+per-atom unique type numbering into a compact, physically meaningful type
+set suitable for GNN force-field training and CG-MD workflows.
 
 This pipeline ships as part of the `ligpargen` package (`ligpargen/pipeline/`)
 and is exposed as its own console script, `molpargen`, installed
 alongside the normal single-molecule `ligpargen` command by the same
-`pip install -e .`. No separate scripts to keep track of, no `--scripts-dir`,
-no `sys.path` tricks — `molpargen` is on `PATH` the same way
-`ligpargen` is.
+`pip install -e .`. The coarsening script (`00_coarsen_datafile.py`) lives at
+the repo root and is loaded dynamically by `ligpargen/tools/coarsen.py` — keep
+it there. No separate scripts to track, no `--scripts-dir`, no `sys.path`
+tricks — `molpargen` is on `PATH` the same way `ligpargen` is.
 
 ## Quick start — one command
 
@@ -261,6 +264,11 @@ stitch   →  species_dir/species_N.lammps.lmp
         │
         ▼
 combine  →  out.lmp   (full system, real coords, real box)
+        │
+        ▼
+  (default, unless --no-coarsen)
+coarsen  →  out_coarse.data + out_topology.json
+             (mol × element-flavor types; verified clean before write)
 ```
 
 `molpargen run` (PSF+PDB) and `molpargen run-mol2` (mol2) only differ in
@@ -289,6 +297,7 @@ molpargen run-mol2 input.mol2 species_dir/ out.lmp [options]
 | `--force-split` | off | pass `--force` to the splitter (skip unsaturated-backbone-atom warnings) |
 | `--box-from FILE` | — | copy box bounds from this LAMMPS data file (passed to combine) |
 | `--box-from-pdb` | off | read box from `input.pdb`'s `CRYST1` record instead (passed to combine) |
+| `--no-coarsen` | off | skip the post-combine coarsening step (coarsening is **on by default**) |
 
 Species with `n_atoms == 1` (bare ions) are skipped by ligpargen entirely —
 `combine` synthesizes a placeholder entry for them (see above).
@@ -409,6 +418,71 @@ boundaries or elsewhere.
 
 ---
 
+## `00_coarsen_datafile.py` — collapse per-atom types to mol × element-flavor
+
+After `combine` produces `out.lmp`, the file still carries LigParGen's original
+per-atom unique type numbering (every atom gets its own type). This step
+collapses those into a much smaller set of physically meaningful types, making
+the file suitable for GNN force-field training and coarse-grained MD workflows.
+
+**Runs automatically** as the final stage of `molpargen run` / `molpargen
+run-mol2` (pass `--no-coarsen` to skip). Can also be run standalone:
+
+```bash
+python 00_coarsen_datafile.py out.lmp [output_prefix]
+```
+
+Outputs:
+- `<prefix>_coarse.data` — coarsened LAMMPS data file
+- `<prefix>_topology.json` — per-molecule atom/bond/angle/dihedral lists + element-sequence dihedral pattern map
+
+### Type-collapsing scheme
+
+| Level | Key |
+|---|---|
+| Atoms | `(mol_id, element)` |
+| Bonds | `(mol_id, canonical elem-pair)` |
+| Angles | `(mol_id, canonical elem-triple)` |
+| Dihedrals | `(mol_id, canonical flavor-quad, coeff)` — see below |
+
+All `*Coeffs` sections are remapped to the new type indices. No values are
+averaged or silently discarded.
+
+### Dihedral keying — why it's richer than atom/bond/angle
+
+A bare element-quad key (`C-C-C-C`) collapses genuinely different OPLS torsion
+types that share the same four elements but different local bonded environments
+(e.g. a backbone C-C-C-C vs one adjacent to a CF₂ group). The fix is a
+two-level key:
+
+1. **1-hop neighbor fingerprint ("flavor")**: each atom is represented as
+   `(element, sorted-tuple-of-neighbor-elements)` rather than element alone.
+   A backbone carbon bonded to `[C, C, H, H]` and a CF₂-adjacent carbon bonded
+   to `[C, C, F, F]` get distinct flavors even though both are `C`.
+
+2. **Coeff tiebreak**: if two dihedral entries still share the same
+   `(mol, flavor-quad)` (rare geometric ambiguity), their Fourier coefficient
+   tuple is appended to the key. This guarantees each new type index uniquely
+   identifies the FF parameters — the same invariant that atoms (mol × element),
+   bonds (mol × elem-pair), and angles (mol × elem-triple) already satisfy.
+
+### Self-check before writing
+
+`verify_coarsening()` runs automatically before the output file is written. For
+every level it checks:
+
+- **(a) no drop** — every old type that had a Coeffs entry maps to a new type
+  that also has one.
+- **(b) no silent merge** — every old type folded into the same new type carried
+  identical coeff values.
+
+On failure it prints itemised diffs and raises `RuntimeError` — the coarsened
+file is never written with bad data. With the flavor + coeff key, the dihedral
+check always passes by construction; the check remains as a guard for future
+changes to the collapsing scheme.
+
+---
+
 ## Using the pipeline as a library
 
 Every stage's core logic lives in `ligpargen.pipeline.<stage>.run(...)`
@@ -454,3 +528,15 @@ only ever needs its own `extract_*.run()` writing the same manifest schema
   cells (α=β=γ=90°); use `--box-from` with a LAMMPS data file for triclinic
   cells instead (tilt factors aren't written by this pipeline either way —
   check your reference file supports it).
+- **`coarsening self-check failed`** — `verify_coarsening()` found that two
+  or more old types with *different* FF parameters were being collapsed into
+  the same new type. With the current dihedral flavor + coeff key this should
+  not occur; if it does on a new system, check whether the `Dihedral Coeffs`
+  section in `out.lmp` contains `None`/missing entries for some types (a BOSS
+  edge case for certain improper torsions). Pass `--no-coarsen` to bypass
+  while investigating, but don't leave it bypassed in production.
+- **Atoms section parse crash (`invalid literal for int: '#'`)** — the LAMMPS
+  data file has inline comments on atom lines (e.g. `... 0 0 0 # mol1`). This
+  is now handled: comment text after `#` is stripped before column parsing.
+  If you see this on a freshly combined file, ensure you're running the current
+  `00_coarsen_datafile.py`, not an older copy.
