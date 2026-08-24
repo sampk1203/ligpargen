@@ -28,7 +28,8 @@ from .run_pipeline import (
 
 def run(mol2_path, species_dir, out_lmp, max_atoms=BOSS_CAP,
         cgen=CGEN_DEFAULT, dry_run=False, force_split=False,
-        orbital_target=ORBITAL_TARGET_DEFAULT, box_from=None, box_from_pdb=False):
+        orbital_target=ORBITAL_TARGET_DEFAULT, box_from=None, box_from_pdb=False,
+        coarsen=True):
 
     # ── stage 0: extract unique species from mol2 (blocking) ─────────────────
     print(f"── extracting unique species from {mol2_path}")
@@ -51,7 +52,8 @@ def run(mol2_path, species_dir, out_lmp, max_atoms=BOSS_CAP,
         manifest_path, species_dir, system_pdb, out_lmp,
         max_atoms=max_atoms, cgen=cgen, dry_run=dry_run,
         force_split=force_split, orbital_target=orbital_target,
-        box_from=box_from, box_from_pdb=box_from_pdb)
+        box_from=box_from, box_from_pdb=box_from_pdb,
+        coarsen=coarsen)
 
 
 def cli(argv=None):
@@ -59,6 +61,7 @@ def cli(argv=None):
 
     dry_run     = '--dry-run'     in args; args = [a for a in args if a != '--dry-run']
     force_split = '--force-split' in args; args = [a for a in args if a != '--force-split']
+    coarsen     = '--no-coarsen'  not in args; args = [a for a in args if a != '--no-coarsen']
 
     max_atoms = BOSS_CAP
     if '--max-atoms' in args:
@@ -106,13 +109,17 @@ def cli(argv=None):
         print("  --force-split          pass --force to the splitter")
         print("  --box-from FILE        copy box bounds from this LAMMPS data file")
         print("  --box-from-pdb         read box from derived system PDB's CRYST1 record")
+        print("  --no-coarsen           skip the post-combine coarsening step (on by default);")
+        print("                         collapses per-atom types to (mol × element), writing")
+        print("                         <out>_coarse.data + <out>_topology.json")
         return 1
 
     mol2_path, species_dir, out_lmp = args
     run(mol2_path, species_dir, out_lmp,
         max_atoms=max_atoms, cgen=cgen, dry_run=dry_run,
         force_split=force_split, orbital_target=orbital_target,
-        box_from=box_from, box_from_pdb=box_from_pdb)
+        box_from=box_from, box_from_pdb=box_from_pdb,
+        coarsen=coarsen)
     return 0
 
 

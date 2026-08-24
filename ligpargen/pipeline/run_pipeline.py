@@ -39,6 +39,7 @@ from . import extract_unique
 from . import split_species
 from . import stitch_fragments
 from . import combine_lammps
+from ..tools.coarsen import coarsen as _coarsen
 
 BOSS_CAP      = 220   # default max atoms per ligpargen run
 CGEN_DEFAULT  = 'CM1A'
@@ -106,7 +107,8 @@ def ligpargen_cmd(pdb_name, mol_name, charge, cgen):
 
 def run(psf_path, pdb_path, species_dir, out_lmp, max_atoms=BOSS_CAP,
         cgen=CGEN_DEFAULT, dry_run=False, force_split=False,
-        orbital_target=ORBITAL_TARGET_DEFAULT, box_from=None, box_from_pdb=False):
+        orbital_target=ORBITAL_TARGET_DEFAULT, box_from=None, box_from_pdb=False,
+        coarsen=True):
 
     # ── stage 0: extract unique species from PSF+PDB (blocking) ──────────────
     print(f"── extracting unique species from {psf_path} / {pdb_path}")
@@ -130,13 +132,14 @@ def run(psf_path, pdb_path, species_dir, out_lmp, max_atoms=BOSS_CAP,
     run_from_manifest(manifest_path, species_dir, original_pdb, out_lmp,
                        max_atoms=max_atoms, cgen=cgen, dry_run=dry_run,
                        force_split=force_split, orbital_target=orbital_target,
-                       box_from=box_from, box_from_pdb=box_from_pdb)
+                       box_from=box_from, box_from_pdb=box_from_pdb,
+                       coarsen=coarsen)
 
 
 def run_from_manifest(manifest_path, species_dir, original_pdb, out_lmp,
                        max_atoms=BOSS_CAP, cgen=CGEN_DEFAULT, dry_run=False,
                        force_split=False, orbital_target=ORBITAL_TARGET_DEFAULT,
-                       box_from=None, box_from_pdb=False):
+                       box_from=None, box_from_pdb=False, coarsen=True):
     """Everything past stage 0 (extraction): ligpargen per species/fragment,
     split, stitch, combine. Format-independent -- doesn't care whether
     manifest.json/species_N.pdb came from PSF+PDB (extract_unique) or mol2
@@ -275,6 +278,10 @@ def run_from_manifest(manifest_path, species_dir, original_pdb, out_lmp,
     if not dry_run and not os.path.exists(out_lmp):
         raise FileNotFoundError(f"combine stage ran but output not found: {out_lmp}")
 
+    if not dry_run and coarsen:
+        print(f"\n── coarsening {out_lmp}")
+        _coarsen(out_lmp)
+
     print("\n" + "═" * 60)
     print(f"PIPELINE COMPLETE: {out_lmp}" if not dry_run else "DRY RUN COMPLETE (nothing written)")
 
@@ -284,6 +291,7 @@ def cli(argv=None):
 
     dry_run     = '--dry-run'     in args; args = [a for a in args if a != '--dry-run']
     force_split = '--force-split' in args; args = [a for a in args if a != '--force-split']
+    coarsen     = '--no-coarsen'  not in args; args = [a for a in args if a != '--no-coarsen']
 
     max_atoms   = BOSS_CAP
     if '--max-atoms' in args:
@@ -329,6 +337,9 @@ def cli(argv=None):
         print("  --force-split          pass --force to the splitter (skip unsaturated backbone warnings)")
         print("  --box-from FILE        copy box bounds from this LAMMPS data file (passed to combine)")
         print("  --box-from-pdb         read box from input.pdb's CRYST1 record (passed to combine)")
+        print("  --no-coarsen           skip the post-combine coarsening step (on by default);")
+        print("                         collapses per-atom types to (mol × element), writing")
+        print("                         <out>_coarse.data + <out>_topology.json")
         return 1
 
     psf_path, pdb_path, species_dir, out_lmp = args
@@ -336,7 +347,8 @@ def cli(argv=None):
         max_atoms=max_atoms, cgen=cgen,
         dry_run=dry_run, force_split=force_split,
         orbital_target=orbital_target,
-        box_from=box_from, box_from_pdb=box_from_pdb)
+        box_from=box_from, box_from_pdb=box_from_pdb,
+        coarsen=coarsen)
     return 0
 
 

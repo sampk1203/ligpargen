@@ -45,7 +45,8 @@ def parse_lammps_data(path):
     def section(name):
         start = None
         for i, l in enumerate(lines):
-            if l.strip() == name:
+            s = l.strip()
+            if s == name or s.startswith(name + " ") or s.startswith(name + "\t"):
                 start = i + 1
                 break
         if start is None:
@@ -79,12 +80,20 @@ def parse_lammps_data(path):
 
     atoms = {}
     for r in section('Atoms'):
-        # id mol type charge x y z  [optional image flags]
+        # id mol type [charge] x y z  [optional image flags]  [# comment]
+        # charge column isn't present in every atom_style (e.g. "molecular"),
+        # and some writers append an inline "# elem" comment — strip that
+        # before deciding column layout.
+        r = ' '.join(r).split('#', 1)[0].split()
         aid = int(r[0])
         mol = int(r[1])
         atype = int(r[2])
-        charge = float(r[3])
-        x, y, z = float(r[4]), float(r[5]), float(r[6])
+        if len(r) >= 7:
+            charge = float(r[3])
+            x, y, z = float(r[4]), float(r[5]), float(r[6])
+        else:
+            charge = 0.0
+            x, y, z = float(r[3]), float(r[4]), float(r[5])
         atoms[aid] = (mol, atype, charge, x, y, z)
 
     bonds = [(int(r[1]), int(r[2]), int(r[3])) for r in section('Bonds')]
