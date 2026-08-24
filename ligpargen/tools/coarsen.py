@@ -7,8 +7,13 @@ Exposes:
     coarsen(datafile, prefix=None) -> (coarse_data_path, topology_json_path)
 
 The coarsen function collapses a LigParGen-combined LAMMPS data file from
-per-atom unique types into (mol_id, element) grouped types, remapping all
-*Coeffs sections to the new type indices so force field values are preserved.
+per-atom unique types into (mol_id, element) grouped types for atoms/bonds/
+angles, and (mol_id, element-flavor-quad, coeff) for dihedrals — where
+"flavor" is a 1-hop neighbor-element fingerprint that distinguishes OPLS
+torsion types sharing the same 4-element sequence but different local
+environments (e.g. backbone C-C-C-C vs branch C-C-C-C adjacent to CF₂).
+All *Coeffs sections are remapped to the new type indices so force field
+values are preserved without averaging or silent data loss.
 """
 
 import os
@@ -40,8 +45,8 @@ _mod = None
 
 def coarsen(datafile, prefix=None):
     """
-    Collapse a LigParGen LAMMPS data file to (mol × element) types,
-    preserving all force field coefficients.
+    Collapse a LigParGen LAMMPS data file to coarsened types,
+    preserving all force field coefficients without loss or averaging.
 
     Args:
         datafile: path to LAMMPS data file produced by combine_lammps

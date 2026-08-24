@@ -443,15 +443,39 @@ def coarsen(datafile, prefix=None):
         key = angle_mol_seq[(ag_id, ag_type, i, j, k)]
         old_agtype_mol_to_new[(ag_type, atom_mol[i])] = angle_key_to_newtype[key]
 
-    # ---- New dihedral types: key = (mol_id, canonical-elem-quad) ----
+    # ---- New dihedral types: key = (mol_id, canonical-flavor-quad, coeff) ----
+    # Pure element-quad collapses genuinely different OPLS torsion types that
+    # happen to share the same 4-element sequence (e.g. backbone C-C-C-C vs a
+    # branch C-C-C-C next to a CF₂).  We use a richer per-atom "flavor" that
+    # fingerprints each atom by (element, sorted-neighbor-elements) — a 1-hop
+    # local environment — then use the dihedral coeff tuple as a final tiebreak
+    # when two entries still share the same flavor-quad.  This is the same
+    # philosophy as atoms (mol × element), bonds (mol × elem-pair), and angles
+    # (mol × elem-triple): the coarsened type must uniquely identify the FF
+    # parameters, never average or silently discard variation.
+    _nbr = defaultdict(list)
+    for b_id, b_type, bi, bj in bonds:
+        _nbr[bi].append(bj)
+        _nbr[bj].append(bi)
+
+    def _atom_flavor(aid):
+        """(element, sorted tuple of neighbor elements) — 1-hop fingerprint."""
+        own = atom_id_to_elem[aid]
+        nbrs = tuple(sorted(atom_id_to_elem[n] for n in _nbr[aid]))
+        return (own, nbrs)
+
     dih_mol_seq = {}
     old_dtype_mol_to_new = {}
     for d_id, d_type, i, j, k, l in dihedrals:
-        mol = atom_mol[i]
-        seq = tuple(atom_id_to_elem[x] for x in [i, j, k, l])
-        if seq[0] > seq[3]:
-            seq = seq[::-1]
-        dih_mol_seq[(d_id, d_type, i, j, k, l)] = (mol, seq)
+        mol  = atom_mol[i]
+        fseq = tuple(_atom_flavor(x) for x in [i, j, k, l])
+        if fseq[0] > fseq[3]:
+            fseq = fseq[::-1]
+        coeff = dihedral_coeffs.get(d_type)
+        # coeff tiebreak: if two entries share mol+flavor-quad but carry
+        # different Fourier parameters, they are distinct FF types and must
+        # get distinct new indices.
+        dih_mol_seq[(d_id, d_type, i, j, k, l)] = (mol, fseq, coeff)
     unique_dih_keys    = sorted(set(dih_mol_seq.values()))
     dih_key_to_newtype = {k: n+1 for n, k in enumerate(unique_dih_keys)}
     for d_id, d_type, i, j, k, l in dihedrals:
@@ -598,8 +622,9 @@ def coarsen(datafile, prefix=None):
     print(f"  Angle types:   (original) → {n_angle_types}  (mol × elem-triple)")
     print(f"  Dihedral types:(original) → {n_dih_types}  (mol × elem-quad)")
     print(f"\nNew dihedral type map:")
-    for (mol, seq), ntype in sorted(dih_key_to_newtype.items(), key=lambda x: x[1]):
-        print(f"  type {ntype:3d}: mol {mol:2d}  {'-'.join(seq)}")
+    for (mol, fseq, coeff), ntype in sorted(dih_key_to_newtype.items(), key=lambda x: x[1]):
+        elems = '-'.join(f[0] for f in fseq)
+        print(f"  type {ntype:3d}: mol {mol:2d}  {elems}  coeff={coeff}")
 
     return out_path, topo_path
 
