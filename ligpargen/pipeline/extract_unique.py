@@ -86,18 +86,40 @@ def read_pdb_atom_lines(pdb_path):
     return atom_lines
 
 
-def write_species_pdb(out_path, serials_in_order, atom_line_by_serial):
+def write_species_pdb(out_path, serials_in_order, atom_line_by_serial, local_bonds=()):
     # normalize resname/resSeq to a single uniform residue: this extracted
     # file is always exactly one molecule, so grouping everything under one
     # residue is safe here (unlike the combined multi-molecule file) and
     # avoids the "lone atom in its own residue" proximity-bonding bug that
     # broke ligpargen on EMC's per-monomer/per-terminal-atom residue naming
+    #
+    # local_bonds (from PSF, ground truth) are written as explicit CONECT
+    # records for the same reason split_species.py's write_fragment_pdb
+    # does it: without them RDKit falls back to proximityBonding, which on
+    # F-dense species (e.g. PVDF-HFP) misreads close nonbonded F...F/F...C
+    # contacts as real bonds, overfills F's valence, and MolFromPDBFile
+    # returns None -- surfacing downstream as a cryptic MolToPDBFile
+    # Boost.Python.ArgumentError. This was previously patched ad hoc per
+    # element (e.g. carbon); writing real CONECT records here removes the
+    # underlying cause for every element at once.
     with open(out_path, 'w') as f:
         for new_i, serial in enumerate(serials_in_order, start=1):
             l = atom_line_by_serial[serial]
             resfixed = l[:17] + 'MOLA' + l[21:22] + '   1' + l[26:]
             renumbered = resfixed[:6] + '%5d' % new_i + resfixed[11:]
             f.write(renumbered)
+
+        neighbors = {}
+        for a, b in local_bonds:
+            neighbors.setdefault(a, []).append(b)
+            neighbors.setdefault(b, []).append(a)
+        for atom in sorted(neighbors):
+            nbrs = sorted(neighbors[atom])
+            # PDB CONECT caps at 4 partners per line; chunk if ever exceeded
+            for k in range(0, len(nbrs), 4):
+                chunk = nbrs[k:k + 4]
+                f.write("CONECT" + f"{atom:5d}" + "".join(f"{n:5d}" for n in chunk) + "\n")
+
         f.write("END\n")
 
 
@@ -125,10 +147,10 @@ def run(psf_path, pdb_path, outdir):
               f"-- representative = molecule {rep_comp_id}")
 
         out_pdb = os.path.join(outdir, f"species_{species_id}.pdb")
-        write_species_pdb(out_pdb, serials, atom_line_by_serial)
         serial_to_local = {s: i for i, s in enumerate(serials, start=1)}
         local_bonds = [[serial_to_local[a], serial_to_local[b]]
                        for a, b in component_bonds(bonds, set(serials))]
+        write_species_pdb(out_pdb, serials, atom_line_by_serial, local_bonds)
 
         # Derive expected net charge from PSF column 6 charges (set by EMC/psfgen).
         # IMPORTANT: PSF per-atom charges are OPLS force-field type charges, not

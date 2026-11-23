@@ -7,11 +7,15 @@ Exposes:
     coarsen(datafile, prefix=None) -> (coarse_data_path, topology_json_path)
 
 The coarsen function collapses a LigParGen-combined LAMMPS data file from
-per-atom unique types into (mol_id, element) grouped types for atoms/bonds/
+per-atom unique types into (mol_id, element, coeff) grouped types for atoms,
+(mol_id, elem-pair, coeff) for bonds, (mol_id, elem-triple, coeff) for
 angles, and (mol_id, element-flavor-quad, coeff) for dihedrals — where
 "flavor" is a 1-hop neighbor-element fingerprint that distinguishes OPLS
 torsion types sharing the same 4-element sequence but different local
 environments (e.g. backbone C-C-C-C vs branch C-C-C-C adjacent to CF₂).
+Every level appends its FF coeff tuple as a tiebreak so the coarsened type
+index always uniquely identifies the FF parameters, never merging two
+distinct OPLS types that happen to share the same element/elem-sequence.
 All *Coeffs sections are remapped to the new type indices so force field
 values are preserved without averaging or silent data loss.
 """

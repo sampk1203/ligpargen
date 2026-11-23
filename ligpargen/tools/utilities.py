@@ -152,7 +152,8 @@ def generateRDkitMolecule(ifile, smile, workdir, molname, debug = False):
 
         if ifile.lower().endswith('.pdb'): 
             
-            molecule = Chem.MolFromPDBFile(ifile,removeHs=False)
+            has_conect = any(l.startswith('CONECT') for l in open(ifile))
+            molecule = Chem.MolFromPDBFile(ifile,removeHs=False,proximityBonding=not has_conect)
 
             atomsNameOriginal, residueNameOriginal = getAtomsNameAndMolFromPDB(ifile)
 
@@ -470,7 +471,20 @@ def generateNewMoleculeWithProperOrder(molecule, atomsIndexLstWithRightOrder):
         newMoleculeBlock += line
 
 
-    newMolecule = Chem.MolFromPDBBlock(newMoleculeBlock, removeHs=False)
+    oldToNewIdx = {old: new for new, old in enumerate(atomsIndexLstWithRightOrder)}
+    conectByAtom = {}
+    for bond in molecule.GetBonds():
+        a = oldToNewIdx[bond.GetBeginAtomIdx()]
+        b = oldToNewIdx[bond.GetEndAtomIdx()]
+        conectByAtom.setdefault(a, []).append(b)
+        conectByAtom.setdefault(b, []).append(a)
+    for atom in sorted(conectByAtom):
+        nbrs = sorted(conectByAtom[atom])
+        for k in range(0, len(nbrs), 4):
+            chunk = nbrs[k:k + 4]
+            newMoleculeBlock += "CONECT" + f"{atom:5d}" + "".join(f"{n:5d}" for n in chunk) + "\n"
+
+    newMolecule = Chem.MolFromPDBBlock(newMoleculeBlock, removeHs=False, proximityBonding=False)
 
     return newMolecule, newIndexToOriginalIndex
 

@@ -349,11 +349,20 @@ def coarsen(datafile, prefix=None):
     atom_id_to_elem = {a["id"]: type_to_elem[a["type"]] for a in atoms}
     atom_mol        = {a["id"]: a["mol"] for a in atoms}
 
-    # ---- New atom type numbering: key = (mol_id, element) ----
-    mol_elem_pairs     = sorted(set((a["mol"], type_to_elem[a["type"]]) for a in atoms))
-    mol_elem_to_newtype = {pair: n+1 for n, pair in enumerate(mol_elem_pairs)}
-    atom_id_to_newtype = {
-        a["id"]: mol_elem_to_newtype[(a["mol"], type_to_elem[a["type"]])]
+    # ---- New atom type numbering: key = (mol_id, element, pair_coeff) ----
+    # A bare (mol, element) key collapses genuinely different OPLS atom types
+    # that share an element within the same molecule (e.g. backbone CT vs a
+    # CF2-adjacent C, both element "C") — same failure mode already fixed for
+    # bonds/angles/dihedrals below. Append the pair coeff tuple as a tiebreak
+    # so the new type index uniquely identifies the FF parameters.
+    atom_mol_elem_coeff = {
+        a["id"]: (a["mol"], type_to_elem[a["type"]], pair_coeffs.get(a["type"]))
+        for a in atoms
+    }
+    mol_elem_pairs      = sorted(set(atom_mol_elem_coeff.values()))
+    mol_elem_to_newtype = {key: n+1 for n, key in enumerate(mol_elem_pairs)}
+    atom_id_to_newtype  = {
+        a["id"]: mol_elem_to_newtype[atom_mol_elem_coeff[a["id"]]]
         for a in atoms
     }
 
@@ -369,9 +378,9 @@ def coarsen(datafile, prefix=None):
     n_atom_types = len(mol_elem_pairs)
     print(f"  Collapsed to {n_atom_types} mol-element types "
           f"(was {len(masses)} unique types)")
-    print("  Atom type map  (mol, elem) → new_type:")
-    for (mol, elem), ntype in sorted(mol_elem_to_newtype.items()):
-        print(f"    mol {mol:2d}  {elem:2s}  →  type {ntype}")
+    print("  Atom type map  (mol, elem, pair_coeff) → new_type:")
+    for (mol, elem, coeff), ntype in sorted(mol_elem_to_newtype.items()):
+        print(f"    mol {mol:2d}  {elem:2s}  {coeff}  →  type {ntype}")
 
     # ---- Per-molecule topology ----
     mol_atoms     = defaultdict(list)
@@ -554,8 +563,8 @@ def coarsen(datafile, prefix=None):
 
         # Masses
         f.write("Masses\n\n")
-        for (mol, elem), ntype in sorted(mol_elem_to_newtype.items(),
-                                         key=lambda x: x[1]):
+        for (mol, elem, coeff), ntype in sorted(mol_elem_to_newtype.items(),
+                                                 key=lambda x: x[1]):
             mass = next(m for t, m in masses.items() if type_to_elem[t] == elem)
             f.write(f"{ntype} {mass:.4f}  # mol{mol}-{elem}\n")
 

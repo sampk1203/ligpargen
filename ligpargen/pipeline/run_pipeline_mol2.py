@@ -22,14 +22,14 @@ import os
 from . import extract_unique_mol2
 from . import run_pipeline
 from .run_pipeline import (
-    call_stage, BOSS_CAP, CGEN_DEFAULT, ORBITAL_TARGET_DEFAULT,
+    call_stage, BOSS_CAP, CGEN_DEFAULT, ORBITAL_TARGET_DEFAULT, WORKERS_DEFAULT,
 )
 
 
 def run(mol2_path, species_dir, out_lmp, max_atoms=BOSS_CAP,
         cgen=CGEN_DEFAULT, dry_run=False, force_split=False,
         orbital_target=ORBITAL_TARGET_DEFAULT, box_from=None, box_from_pdb=False,
-        coarsen=True):
+        coarsen=True, workers=WORKERS_DEFAULT):
 
     # ── stage 0: extract unique species from mol2 (blocking) ─────────────────
     print(f"── extracting unique species from {mol2_path}")
@@ -53,7 +53,7 @@ def run(mol2_path, species_dir, out_lmp, max_atoms=BOSS_CAP,
         max_atoms=max_atoms, cgen=cgen, dry_run=dry_run,
         force_split=force_split, orbital_target=orbital_target,
         box_from=box_from, box_from_pdb=box_from_pdb,
-        coarsen=coarsen)
+        coarsen=coarsen, workers=workers)
 
 
 def cli(argv=None):
@@ -80,6 +80,13 @@ def cli(argv=None):
         i = args.index('--cgen')
         cgen = args[i + 1]
         del args[i:i + 2]
+
+    workers = WORKERS_DEFAULT
+    for flag in ('--workers', '-w'):
+        if flag in args:
+            i = args.index(flag)
+            workers = int(args[i + 1])
+            del args[i:i + 2]
 
     box_from_pdb = '--box-from-pdb' in args
     if box_from_pdb:
@@ -112,6 +119,8 @@ def cli(argv=None):
         print("  --no-coarsen           skip the post-combine coarsening step (on by default);")
         print("                         collapses per-atom types to (mol × element), writing")
         print("                         <out>_coarse.data + <out>_topology.json")
+        print("  --workers N, -w N      run up to N ligpargen calls in parallel (default: 1,")
+        print("                         i.e. serial -- same behavior as before this flag existed)")
         return 1
 
     mol2_path, species_dir, out_lmp = args
@@ -119,7 +128,7 @@ def cli(argv=None):
         max_atoms=max_atoms, cgen=cgen, dry_run=dry_run,
         force_split=force_split, orbital_target=orbital_target,
         box_from=box_from, box_from_pdb=box_from_pdb,
-        coarsen=coarsen)
+        coarsen=coarsen, workers=workers)
     return 0
 
 
