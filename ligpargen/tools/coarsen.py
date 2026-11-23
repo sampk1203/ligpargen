@@ -26,22 +26,8 @@ import sys
 
 
 def _load_coarsen_module():
-    """Locate and load 00_coarsen_datafile.py relative to this package root."""
-    # Package tree: <repo>/ligpargen/tools/coarsen.py
-    # 00_coarsen_datafile.py lives at <repo> root (tracked in git). Walk up from here.
-    here = os.path.dirname(os.path.abspath(__file__))
-    # here = <repo>/ligpargen/tools
-    candidate = os.path.join(here, os.pardir, os.pardir,
-                             "00_coarsen_datafile.py")
-    candidate = os.path.normpath(candidate)
-    if not os.path.isfile(candidate):
-        raise FileNotFoundError(
-            f"00_coarsen_datafile.py not found at expected path: {candidate}\n"
-            f"Place it at the repo root, alongside setup.py.")
-    spec = importlib.util.spec_from_file_location("_coarsen_datafile", candidate)
-    mod  = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    from . import coarsen_datafile
+    return coarsen_datafile
 
 
 _mod = None
