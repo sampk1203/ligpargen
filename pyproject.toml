@@ -7,7 +7,7 @@ name = "ligpargen"
 version = "2.1"
 description = "A new version of the ligpargen including alchemical transformations"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 license = { text = "MIT" }
 authors = [{ name = "Israel Cabeza de Vaca Lopez", email = "israel.cabezadevaca@icm.uu.se" }]
 keywords = ["OPLS", "OPLSAA", "CM1A", "CM1A-LBCC"]
